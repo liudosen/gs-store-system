@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Rust Coupled Fullstack</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <section class="hero">
+        <p class="eyebrow">Rust + Axum</p>
+        <h1>前后端耦合项目</h1>
+        <p class="subtitle">一个 Rust 服务同时提供 API 与前端页面。</p>
+      </section>
+
+      <section class="panel">
+        <div class="panel-header">
+          <div>
+            <h2>消息</h2>
+            <p id="status">连接中...</p>
+          </div>
+          <button id="refresh" type="button">刷新</button>
+        </div>
+
+        <form id="message-form" class="composer">
+          <input
+            id="message-input"
+            name="message"
+            type="text"
+            maxlength="120"
+            placeholder="输入一条消息"
+            autocomplete="off"
+            required
+          />
+          <button type="submit">发送</button>
+        </form>
+
+        <ul id="messages" class="messages"></ul>
+      </section>
+    </main>
+
+    <script src="/app.js" type="module"></script>
+  </body>
+</html>
