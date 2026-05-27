@@ -1,4 +1,4 @@
-# Rust build outputs
+﻿# Rust build outputs
 /target/
 /**/target/
 
@@ -27,4 +27,7 @@
 # Local IDE metadata
 .idea/
 .vscode/
+
+env
+.env
 
