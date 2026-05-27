@@ -1,6 +1,30 @@
-/target
-Cargo.lock
-.env
-/logs
-frontend/node_modules
-frontend/dist
+# Rust build outputs
+/target/
+/**/target/
+
+# Runtime logs
+/logs/
+/**/logs/
+*.log
+
+# Release bundles and binaries
+/release/
+/**/release/
+*.tar.gz
+*.zip
+*.exe
+*.pdb
+*.dll
+*.so
+*.dylib
+
+# Frontend and portal build artifacts
+/dist/
+/**/dist/
+/node_modules/
+/**/node_modules/
+
+# Local IDE metadata
+.idea/
+.vscode/
+
