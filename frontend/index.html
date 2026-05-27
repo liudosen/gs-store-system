@@ -1,45 +1,40 @@
 <!doctype html>
 <html lang="zh-CN">
   <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Rust Coupled Fullstack</title>
-    <link rel="stylesheet" href="/styles.css" />
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#133f67" />
+    <meta name="format-detection" content="telephone=no,email=no,address=no" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-title" content="迷彩侠" />
+    <title>迷彩侠实业有限公司</title>
+    <meta
+      name="description"
+      content="迷彩侠实业有限公司，聚焦退役军人创就业、实业合作与就业平台服务。"
+    />
+    <!-- PAGE_META_START -->
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="迷彩侠实业有限公司" />
+    <meta property="og:title" content="迷彩侠实业有限公司" />
+    <meta
+      property="og:description"
+      content="迷彩侠实业有限公司，聚焦退役军人创就业、实业合作与就业平台服务。"
+    />
+    <meta property="og:url" content="https://www.mcx59481.cn/" />
+    <meta property="og:image" content="https://www.mcx59481.cn/share/veteran-portal-cover.jpg" />
+    <meta property="og:image:alt" content="迷彩侠退役军人服务平台" />
+    <meta property="og:locale" content="zh_CN" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="迷彩侠实业有限公司" />
+    <meta
+      name="twitter:description"
+      content="迷彩侠实业有限公司，聚焦退役军人创就业、实业合作与就业平台服务。"
+    />
+    <meta name="twitter:image" content="https://www.mcx59481.cn/share/veteran-portal-cover.jpg" />
+    <!-- PAGE_META_END -->
   </head>
   <body>
-    <main class="shell">
-      <section class="hero">
-        <p class="eyebrow">Rust + Axum</p>
-        <h1>前后端耦合项目</h1>
-        <p class="subtitle">一个 Rust 服务同时提供 API 与前端页面。</p>
-      </section>
-
-      <section class="panel">
-        <div class="panel-header">
-          <div>
-            <h2>消息</h2>
-            <p id="status">连接中...</p>
-          </div>
-          <button id="refresh" type="button">刷新</button>
-        </div>
-
-        <form id="message-form" class="composer">
-          <input
-            id="message-input"
-            name="message"
-            type="text"
-            maxlength="120"
-            placeholder="输入一条消息"
-            autocomplete="off"
-            required
-          />
-          <button type="submit">发送</button>
-        </form>
-
-        <ul id="messages" class="messages"></ul>
-      </section>
-    </main>
-
-    <script src="/app.js" type="module"></script>
+    <div id="app"></div>
+    <script type="module" src="/src/main.js"></script>
   </body>
 </html>
