@@ -2,8 +2,9 @@
 
 ## Project Overview
 
-This repository contains the GS Store System platform. The main backend service
-lives in `gs-store-system/` and is a Rust API for the mini app and admin system.
+This repository contains the GS Store System platform. It is a full-stack
+monorepo: the Rust API service lives in `backend/`, and the admin web app lives
+in `frontend/`.
 
 The backend uses:
 
@@ -14,17 +15,17 @@ The backend uses:
 - OSS integration for file upload
 - JK Pay integration for payment flows
 
-The admin frontend lives in `backend/`. Deployment helpers live under `deploy/`.
+Deployment helpers live under `deploy/`.
 
 ## Important Paths
 
-- `gs-store-system/src/main.rs` - service entrypoint
-- `gs-store-system/src/config.rs` - environment configuration
-- `gs-store-system/src/state.rs` - shared app state
-- `gs-store-system/src/routes/` - API routes
-- `gs-store-system/src/models/` - database models
-- `gs-store-system/migrations/` - SQL migrations
-- `backend/` - admin frontend
+- `backend/src/main.rs` - service entrypoint
+- `backend/src/config.rs` - environment configuration
+- `backend/src/state.rs` - shared app state
+- `backend/src/routes/` - API routes
+- `backend/src/models/` - database models
+- `backend/migrations/` - SQL migrations
+- `frontend/` - admin frontend
 - `deploy/` - release scripts
 - `deploy.ps1` - single entrypoint for backend/frontend publishing
 

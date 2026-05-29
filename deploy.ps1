@@ -15,7 +15,7 @@ $DeployDir = Join-Path $PSScriptRoot "deploy"
 $BackendScript = Join-Path $DeployDir "release.bat"
 $FrontendScript = Join-Path $DeployDir "deploy-frontend.ps1"
 $RootEnvFile = Join-Path $PSScriptRoot "env"
-$BackendEnvFile = Join-Path $PSScriptRoot "gs-store-system\.env"
+$BackendEnvFile = Join-Path $PSScriptRoot "backend\.env"
 
 function Assert-File {
     param([string]$Path)
@@ -97,7 +97,7 @@ function Invoke-BackendDeploy {
 }
 
 function Invoke-FrontendDeploy {
-    $frontendDir = Join-Path $PSScriptRoot "backend"
+    $frontendDir = Join-Path $PSScriptRoot "frontend"
     $env:VITE_API_BASE_URL = $FrontendApiBaseUrl
 
     if ($SkipFrontendBuild) {

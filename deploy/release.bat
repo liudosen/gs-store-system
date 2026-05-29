@@ -2,7 +2,7 @@
 setlocal EnableExtensions EnableDelayedExpansion
 
 set "SCRIPT_DIR=%~dp0"
-set "BACKEND_DIR=%SCRIPT_DIR%..\gs-store-system"
+set "BACKEND_DIR=%SCRIPT_DIR%..\backend"
 
 pushd "%BACKEND_DIR%" || exit /b 1
 call :main %*

@@ -1,7 +1,7 @@
 param(
     [string]$Server = "47.103.220.84",
     [string]$User = "root",
-    [string]$RemoteBase = "/root/workspace/gs-store-system/backend",
+    [string]$RemoteBase = "/root/workspace/gs-store-system/frontend",
     [string]$FrontendDir,
     [string]$ArchiveName = "frontend-dist.tar.gz",
     [switch]$SkipBuild
