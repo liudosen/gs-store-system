@@ -6,7 +6,6 @@
 /logs/
 /**/logs/
 *.log
-
 # Release bundles and binaries
 /release/
 /**/release/
@@ -17,17 +16,14 @@
 *.dll
 *.so
 *.dylib
-
 # Frontend and portal build artifacts
 /dist/
 /**/dist/
 /node_modules/
 /**/node_modules/
-
 # Local IDE metadata
 .idea/
 .vscode/
-
 env
 .env
 
