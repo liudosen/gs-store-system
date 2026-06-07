@@ -17,10 +17,6 @@ pub struct PayResult {
     pub fail_reason: Option<String>,
 }
 
-pub fn calc_jk_payment_amount_fen(total_amount_fen: i64) -> i64 {
-    payment_flow::calc_jk_payment_amount_fen(total_amount_fen)
-}
-
 pub async fn warmup<C>(
     redis: &mut C,
     seller_username: &str,
@@ -77,6 +73,38 @@ where
 /// 单独查询健康卡账户余额。
 ///
 /// 这里复用支付流程里的第三方接口，只返回余额，不执行扣款。
+pub async fn jk_pay_exact_amount<C>(
+    redis: &mut C,
+    seller_username: &str,
+    seller_password: &str,
+    card_no: &str,
+    card_password: &str,
+    deduct_amount_fen: i64,
+) -> PayResult
+where
+    C: ConnectionLike + Send,
+{
+    match payment_flow::do_jk_pay_exact_amount(
+        redis,
+        seller_username,
+        seller_password,
+        card_no,
+        card_password,
+        deduct_amount_fen,
+    )
+    .await
+    {
+        Ok(r) => r,
+        Err(e) => PayResult {
+            success: false,
+            paid_amount: 0,
+            order_status: None,
+            external_order_no: None,
+            fail_reason: Some(e),
+        },
+    }
+}
+
 pub async fn query_health_card_balance<C>(
     redis: &mut C,
     seller_username: &str,

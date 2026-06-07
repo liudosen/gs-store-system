@@ -117,15 +117,15 @@ pub async fn quote_recharge(
     let _openid = validate_wechat_user(&state, &headers).await?;
     validation::validate_recharge_amount(query.amount)?;
 
-    let estimated_paid_amount = crate::services::jk_pay::calc_jk_payment_amount_fen(query.amount);
+    let estimated_paid_amount = query.amount;
 
     Ok(Json(ApiResponse::success(RechargeQuoteResp {
         amount: query.amount,
         amount_yuan: query.amount as f64 / 100.0,
         estimated_paid_amount,
         estimated_paid_amount_yuan: estimated_paid_amount as f64 / 100.0,
-        reimbursement_rate: 0.95,
-        message: "健康卡按 95% 报销比例试算，实际扣款金额以支付结果为准".to_string(),
+        reimbursement_rate: 1.0,
+        message: "充值按输入金额扣款，到账金额等于扣款金额".to_string(),
     })))
 }
 

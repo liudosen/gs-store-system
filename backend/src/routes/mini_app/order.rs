@@ -62,10 +62,11 @@ mod tests {
     use std::env;
 
     #[test]
-    fn calc_balance_payment_amount_applies_tax_point() {
-        assert_eq!(calc_balance_payment_amount(100), 105);
-        assert_eq!(calc_balance_payment_amount(10_000), 10_526);
-        assert_eq!(calc_balance_payment_amount(1), 1);
+    fn calc_balance_payment_amount_uses_actual_deduct_amount() {
+        assert_eq!(calc_balance_payment_amount(100, 0), 105);
+        assert_eq!(calc_balance_payment_amount(10_000, 500), 10_000);
+        assert_eq!(calc_balance_payment_amount(1, 0), 1);
+        assert_eq!(calc_balance_payment_amount(100, 150), 0);
     }
 
     #[test]
@@ -166,7 +167,7 @@ mod tests {
     #[tokio::test]
     #[ignore]
     async fn payment_submit_guard_releases_even_when_closure_fails() {
-        let redis = build_test_redis_connection().await;
+        let redis = build_test_redis_pool();
         let state = build_test_state(redis);
         let openid = "openid-payment-lock-test-fail";
         let lock_key = build_payment_submit_guard_key(openid);

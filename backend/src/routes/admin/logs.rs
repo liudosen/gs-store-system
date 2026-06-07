@@ -9,7 +9,7 @@ use axum::{
     http::HeaderMap,
     Json,
 };
-use chrono::{DateTime, FixedOffset, Offset, Utc};
+use chrono::{DateTime, FixedOffset, NaiveDate, Offset, Utc};
 use serde::{Deserialize, Serialize};
 use std::{
     collections::VecDeque,
@@ -96,46 +96,51 @@ fn resolve_log_path(kind: LogKind) -> PathBuf {
         LogKind::Error => "error.log",
     };
 
-    if let Some(latest) = resolve_latest_daily_log(&base_dir, file_prefix) {
+    if let Some(latest) = resolve_latest_log(&base_dir, file_prefix) {
         return latest;
+    }
+
+    if kind == LogKind::App {
+        if let Some(stdout_log) = base_dir.parent().map(|log_root| log_root.join("app.log")) {
+            if stdout_log.exists() {
+                return stdout_log;
+            }
+        }
     }
 
     base_dir.join(file_prefix)
 }
 
-fn resolve_latest_daily_log(log_root: &PathBuf, file_prefix: &str) -> Option<PathBuf> {
+fn resolve_latest_log(log_root: &PathBuf, file_prefix: &str) -> Option<PathBuf> {
     let entries = std::fs::read_dir(log_root).ok()?;
     let mut candidates: Vec<(chrono::NaiveDate, std::time::SystemTime, PathBuf)> = Vec::new();
 
     for entry in entries.flatten() {
         let path = entry.path();
-        if !path.is_dir() {
+        if path.is_file() {
+            collect_log_candidate(&mut candidates, file_prefix, &entry);
             continue;
         }
 
-        let dir_name = path.file_name()?.to_str()?;
-        let dir_date = chrono::NaiveDate::parse_from_str(dir_name, "%Y-%m-%d").ok()?;
-        let dir_entries = std::fs::read_dir(&path).ok()?;
-        for file_entry in dir_entries.flatten() {
-            let file_path = file_entry.path();
-            if !file_path.is_file() {
+        if path.is_dir() {
+            let Some(dir_name) = path.file_name().and_then(|n| n.to_str()) else {
                 continue;
-            }
-
-            let Some(file_name) = file_path.file_name().and_then(|n| n.to_str()) else {
+            };
+            let Some(dir_date) = NaiveDate::parse_from_str(dir_name, "%Y-%m-%d").ok() else {
                 continue;
             };
 
-            if !file_name.starts_with(file_prefix) {
+            let Some(dir_entries) = std::fs::read_dir(&path).ok() else {
                 continue;
+            };
+            for file_entry in dir_entries.flatten() {
+                collect_log_candidate_with_date(
+                    &mut candidates,
+                    file_prefix,
+                    &file_entry,
+                    Some(dir_date),
+                );
             }
-
-            let modified = file_entry
-                .metadata()
-                .ok()
-                .and_then(|m| m.modified().ok())
-                .unwrap_or(std::time::SystemTime::UNIX_EPOCH);
-            candidates.push((dir_date, modified, file_path));
         }
     }
 
@@ -150,6 +155,69 @@ fn resolve_latest_daily_log(log_root: &PathBuf, file_prefix: &str) -> Option<Pat
             },
         )
         .map(|(_, _, path)| path)
+}
+
+fn collect_log_candidate(
+    candidates: &mut Vec<(NaiveDate, std::time::SystemTime, PathBuf)>,
+    file_prefix: &str,
+    entry: &std::fs::DirEntry,
+) {
+    collect_log_candidate_with_date(candidates, file_prefix, entry, None);
+}
+
+fn collect_log_candidate_with_date(
+    candidates: &mut Vec<(NaiveDate, std::time::SystemTime, PathBuf)>,
+    file_prefix: &str,
+    entry: &std::fs::DirEntry,
+    fallback_date: Option<NaiveDate>,
+) {
+    let file_path = entry.path();
+    if !file_path.is_file() {
+        return;
+    }
+
+    let Some(file_name) = file_path.file_name().and_then(|n| n.to_str()) else {
+        return;
+    };
+
+    if !file_name.starts_with(file_prefix) {
+        return;
+    }
+
+    let Some(log_date) = find_date_in_name(file_name).or(fallback_date) else {
+        return;
+    };
+
+    let modified = entry
+        .metadata()
+        .ok()
+        .and_then(|m| m.modified().ok())
+        .unwrap_or(std::time::SystemTime::UNIX_EPOCH);
+    candidates.push((log_date, modified, file_path));
+}
+
+fn find_date_in_name(name: &str) -> Option<NaiveDate> {
+    let bytes = name.as_bytes();
+    if bytes.len() < 10 {
+        return None;
+    }
+
+    for index in 0..=bytes.len() - 10 {
+        let candidate = &bytes[index..index + 10];
+        if candidate[4] != b'-' || candidate[7] != b'-' {
+            continue;
+        }
+
+        let Ok(candidate) = std::str::from_utf8(candidate) else {
+            continue;
+        };
+
+        if let Ok(date) = NaiveDate::parse_from_str(candidate, "%Y-%m-%d") {
+            return Some(date);
+        }
+    }
+
+    None
 }
 
 fn display_normalized_path(path: &Path) -> PathBuf {

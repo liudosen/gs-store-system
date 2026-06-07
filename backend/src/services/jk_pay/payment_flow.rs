@@ -488,14 +488,75 @@ pub(super) async fn do_jk_pay<C>(
 where
     C: ConnectionLike + Send,
 {
-    let amount_yuan = calc_jk_payment_amount_fen(total_amount_fen) as f64 / 100.0;
+    let deduct_amount_fen = calc_jk_payment_amount_fen(total_amount_fen);
+    do_jk_pay_with_deduct_amount(
+        redis,
+        seller_username,
+        seller_password,
+        card_no,
+        card_password,
+        deduct_amount_fen,
+        Some(total_amount_fen),
+    )
+    .await
+}
+
+pub(super) async fn do_jk_pay_exact_amount<C>(
+    redis: &mut C,
+    seller_username: &str,
+    seller_password: &str,
+    card_no: &str,
+    card_password: &str,
+    deduct_amount_fen: i64,
+) -> Result<PayResult, String>
+where
+    C: ConnectionLike + Send,
+{
+    do_jk_pay_with_deduct_amount(
+        redis,
+        seller_username,
+        seller_password,
+        card_no,
+        card_password,
+        deduct_amount_fen,
+        None,
+    )
+    .await
+}
+
+async fn do_jk_pay_with_deduct_amount<C>(
+    redis: &mut C,
+    seller_username: &str,
+    seller_password: &str,
+    card_no: &str,
+    card_password: &str,
+    deduct_amount_fen: i64,
+    source_amount_fen: Option<i64>,
+) -> Result<PayResult, String>
+where
+    C: ConnectionLike + Send,
+{
+    if deduct_amount_fen <= 0 {
+        return Err("payment amount must be positive".to_string());
+    }
+
+    let amount_yuan = deduct_amount_fen as f64 / 100.0;
     let started = Instant::now();
 
-    tracing::info!(
-        "[JK Pay] total_amount_fen={} -> amount_yuan={}",
-        total_amount_fen,
-        amount_yuan
-    );
+    if let Some(source_amount_fen) = source_amount_fen {
+        tracing::info!(
+            "[JK Pay] source_amount_fen={} deduct_amount_fen={} amount_yuan={}",
+            source_amount_fen,
+            deduct_amount_fen,
+            amount_yuan
+        );
+    } else {
+        tracing::info!(
+            "[JK Pay] exact deduct_amount_fen={} amount_yuan={}",
+            deduct_amount_fen,
+            amount_yuan
+        );
+    }
 
     let jk = JkClient::new()?;
     let line = build_trade_line(amount_yuan);

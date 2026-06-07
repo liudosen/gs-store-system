@@ -25,7 +25,7 @@ pub(super) async fn process_recharge(
     let order = create_recharge_order(state, user.id, amount, request_hash).await?;
 
     let mut redis_conn = state.redis_conn().await?;
-    let pay_result = jk_pay::jk_pay(
+    let pay_result = jk_pay::jk_pay_exact_amount(
         &mut redis_conn,
         &state.jk_seller_username,
         &state.jk_seller_password,

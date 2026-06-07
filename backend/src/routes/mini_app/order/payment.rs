@@ -6,8 +6,16 @@ use crate::services::jk_pay;
 use crate::state::AppState;
 use axum::Json;
 
-pub(crate) fn calc_balance_payment_amount(total_amount_fen: i64) -> i64 {
-    ((total_amount_fen as f64) / 0.95).round() as i64
+pub(crate) fn calc_balance_payment_amount(
+    total_amount_fen: i64,
+    discount_amount_fen: i64,
+) -> i64 {
+    let payable_amount_fen = total_amount_fen
+        .max(0)
+        .saturating_sub(discount_amount_fen.max(0))
+        .max(0);
+
+    ((payable_amount_fen as f64) / 0.95).round() as i64
 }
 
 pub(super) fn build_balance_trade_no(order_id: u64) -> String {
@@ -53,7 +61,8 @@ pub(super) async fn pay_order_with_balance_impl(
             ))));
         }
 
-        let balance_paid_amount = calc_balance_payment_amount(order.total_amount);
+        let balance_paid_amount =
+            calc_balance_payment_amount(order.total_amount, order.discount_amount);
         if current_balance < balance_paid_amount {
             return Ok(Json(ApiResponse::success(mapping::build_balance_pay_resp(
                 false,
