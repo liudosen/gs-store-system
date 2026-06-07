@@ -246,6 +246,22 @@ pub async fn update_order_status(
         ));
     }
 
+    let next_total_amount = if let Some(total_amount) = body.total_amount {
+        if total_amount < 0 {
+            return Err(AppError::BadRequest(
+                "total amount cannot be negative".to_string(),
+            ));
+        }
+        if current_order.status != 0 || body.status != 0 || current_order.paid_amount > 0 {
+            return Err(AppError::BadRequest(
+                "only unpaid orders can be repriced".to_string(),
+            ));
+        }
+        total_amount
+    } else {
+        current_order.total_amount
+    };
+
     let carrier = body.carrier.as_deref().unwrap_or("").trim();
     let tracking_no = body.tracking_no.as_deref().unwrap_or("").trim();
     let delivery_name = body.delivery_name.as_deref().unwrap_or("").trim();
@@ -260,9 +276,10 @@ pub async fn update_order_status(
 
     let mut tx = state.db.begin().await?;
     let updated = sqlx::query(
-        "UPDATE orders SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND status = ?",
+        "UPDATE orders SET status = ?, total_amount = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND status = ?",
     )
     .bind(body.status)
+    .bind(next_total_amount)
     .bind(id)
     .bind(current_order.status)
     .execute(&mut *tx)

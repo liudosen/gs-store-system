@@ -19,6 +19,7 @@ const editingOrder = ref(null)
 const filters = reactive({ page: 1, page_size: 10, status: undefined, order_no: '', openid: '' })
 const editForm = reactive({
   status: 1,
+  total_amount_yuan: '',
   carrier: '',
   tracking_no: '',
   delivery_name: '',
@@ -36,6 +37,14 @@ const statuses = [
 
 const statusOptions = computed(() => statuses)
 const showLogisticsForm = computed(() => Number(editForm.status) === 2)
+const canEditPayableAmount = computed(() => {
+  const order = editingOrder.value
+  return (
+    Number(read(order, 'status', 'status')) === 0 &&
+    Number(editForm.status) === 0 &&
+    Number(read(order, 'paidAmount', 'paid_amount', 0)) === 0
+  )
+})
 
 function read(record, camelKey, snakeKey, fallback = '') {
   if (!record) return fallback
@@ -44,6 +53,17 @@ function read(record, camelKey, snakeKey, fallback = '') {
 
 function money(value) {
   return `¥${(Number(value || 0) / 100).toFixed(2)}`
+}
+
+function centsToYuan(value) {
+  return (Number(value || 0) / 100).toFixed(2)
+}
+
+function yuanToCents(value) {
+  const text = String(value ?? '').trim()
+  if (!/^\d+(\.\d{0,2})?$/.test(text)) return null
+  const [yuan, cents = ''] = text.split('.')
+  return Number(yuan) * 100 + Number(cents.padEnd(2, '0'))
 }
 
 function statusLabel(record) {
@@ -179,6 +199,7 @@ async function showDetail(record) {
 function fillEditForm(order) {
   const info = logistics(order) || {}
   editForm.status = Number(read(order, 'status', 'status', 1))
+  editForm.total_amount_yuan = centsToYuan(read(order, 'totalAmount', 'total_amount', 0))
   editForm.carrier = read(info, 'carrier', 'carrier', '')
   editForm.tracking_no = read(info, 'trackingNo', 'tracking_no', '')
   editForm.delivery_name = read(info, 'deliveryName', 'delivery_name', '')
@@ -208,17 +229,26 @@ async function saveEdit() {
     Message.warning('修改为待收货时，需要填写物流单号或派件人手机号')
     return
   }
+  const payload = {
+    status: Number(editForm.status),
+    carrier: editForm.carrier.trim(),
+    tracking_no: editForm.tracking_no.trim(),
+    delivery_name: editForm.delivery_name.trim(),
+    delivery_phone: editForm.delivery_phone.trim(),
+    logistics_remark: editForm.logistics_remark.trim()
+  }
+  if (canEditPayableAmount.value) {
+    const totalAmount = yuanToCents(editForm.total_amount_yuan)
+    if (totalAmount === null) {
+      Message.warning('应付金额需要填写非负金额，最多两位小数')
+      return
+    }
+    payload.total_amount = totalAmount
+  }
 
   saving.value = true
   try {
-    await updateOrderStatus(read(editingOrder.value, 'id', 'id'), {
-      status: Number(editForm.status),
-      carrier: editForm.carrier.trim(),
-      tracking_no: editForm.tracking_no.trim(),
-      delivery_name: editForm.delivery_name.trim(),
-      delivery_phone: editForm.delivery_phone.trim(),
-      logistics_remark: editForm.logistics_remark.trim()
-    })
+    await updateOrderStatus(read(editingOrder.value, 'id', 'id'), payload)
     Message.success('订单已更新')
     editVisible.value = false
     await loadData()
@@ -271,7 +301,8 @@ onMounted(loadData)
                 <th>外部订单号</th>
                 <th>用户</th>
                 <th>商品摘要</th>
-                <th>金额</th>
+                <th>应付</th>
+                <th>实付</th>
                 <th>状态</th>
                 <th>物流</th>
                 <th>下单时间</th>
@@ -293,6 +324,9 @@ onMounted(loadData)
                 </td>
                 <td>
                   <span class="order-summary">{{ goodsSummary(record) }}</span>
+                </td>
+                <td>
+                  <span class="strong-text">{{ money(read(record, 'totalAmount', 'total_amount', 0)) }}</span>
                 </td>
                 <td>
                   <span class="strong-text">{{ money(read(record, 'paidAmount', 'paid_amount', 0)) }}</span>
@@ -345,7 +379,7 @@ onMounted(loadData)
             <a-descriptions-item label="状态">
               <a-tag :color="statusColor(read(detail, 'status', 'status'))">{{ statusLabel(detail) }}</a-tag>
             </a-descriptions-item>
-            <a-descriptions-item label="总额">{{ money(read(detail, 'totalAmount', 'total_amount', 0)) }}</a-descriptions-item>
+            <a-descriptions-item label="应付">{{ money(read(detail, 'totalAmount', 'total_amount', 0)) }}</a-descriptions-item>
             <a-descriptions-item label="实付">{{ money(read(detail, 'paidAmount', 'paid_amount', 0)) }}</a-descriptions-item>
             <a-descriptions-item label="备注" :span="2">{{ read(detail, 'remark', 'remark') || '-' }}</a-descriptions-item>
           </a-descriptions>
@@ -419,6 +453,15 @@ onMounted(loadData)
               <a-option v-for="item in statusOptions" :key="item.value" :value="item.value">{{ item.label }}</a-option>
             </a-select>
           </a-form-item>
+          <a-form-item label="应付金额（元）" required>
+            <a-input
+              v-model="editForm.total_amount_yuan"
+              placeholder="例如 99.00"
+              :disabled="!canEditPayableAmount"
+              allow-clear
+            />
+            <div v-if="!canEditPayableAmount" class="form-help">仅待付款且未实付订单可改价</div>
+          </a-form-item>
 
           <div v-if="showLogisticsForm" class="order-logistics-form">
             <a-form-item label="物流公司">
@@ -447,3 +490,12 @@ onMounted(loadData)
     </a-modal>
   </div>
 </template>
+
+<style scoped>
+.form-help {
+  margin-top: 6px;
+  color: var(--color-text-3);
+  font-size: 12px;
+  line-height: 1.4;
+}
+</style>

@@ -1,10 +1,15 @@
 import { defineStore } from 'pinia'
 import { fetchAccessCodes, login, logout } from '@/api/admin'
+import { canAccessPermission, firstAccessibleAdminPath } from '@/config/adminPermissions'
 import { getAdminToken, setAdminToken } from '@/utils/authStorage'
 
 export const useAuthStore = defineStore('auth', {
   state: () => ({ token: getAdminToken(), user: null, accessCodes: [] }),
-  getters: { isAuthenticated: (state) => Boolean(state.token) },
+  getters: {
+    isAuthenticated: (state) => Boolean(state.token),
+    canAccess: (state) => (permission) => canAccessPermission(state.accessCodes, state.user?.isAdmin, permission),
+    firstAccessiblePath: (state) => firstAccessibleAdminPath(state.accessCodes, state.user?.isAdmin)
+  },
   actions: {
     persistToken(token) {
       this.token = token || ''

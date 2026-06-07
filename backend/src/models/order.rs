@@ -174,6 +174,8 @@ pub struct BalancePayResp {
 #[derive(Debug, Deserialize)]
 pub struct UpdateOrderStatusRequest {
     pub status: i8,
+    #[serde(alias = "totalAmount")]
+    pub total_amount: Option<i64>,
     pub carrier: Option<String>,
     #[serde(alias = "trackingNo")]
     pub tracking_no: Option<String>,
