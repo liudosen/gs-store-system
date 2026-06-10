@@ -182,12 +182,18 @@ function revealPassword(record) {
 }
 
 async function showBalance(record) {
+  const identityNo = read(record, 'idCardNumber', 'id_card_number')
+  if (!identityNo) {
+    Message.warning('该用户未填写认证号，无法查询余额')
+    return
+  }
+
   balanceVisible.value = true
   balanceUser.value = record
   balanceInfo.value = null
   balanceLoading.value = true
   try {
-    balanceInfo.value = await fetchBalanceTransactions(miniAppId(record))
+    balanceInfo.value = await fetchBalanceTransactions(identityNo)
   } catch (error) {
     Message.error(error.message || '余额加载失败')
   } finally {
@@ -216,9 +222,9 @@ onMounted(loadData)
           <a-option :value="1">男</a-option>
           <a-option :value="2">女</a-option>
         </a-select>
-        <a-select v-model="filters.real_name_status" placeholder="实名状态" allow-clear style="width: 140px">
-          <a-option :value="0">未实名</a-option>
-          <a-option :value="1">已实名</a-option>
+        <a-select v-model="filters.real_name_status" placeholder="认证状态" allow-clear style="width: 140px">
+          <a-option :value="0">未认证</a-option>
+          <a-option :value="1">已认证</a-option>
         </a-select>
         <a-button type="primary" @click="search">查询</a-button>
         <a-button @click="resetFilters">重置</a-button>
@@ -237,8 +243,8 @@ onMounted(loadData)
                 <th>小程序ID</th>
                 <th>手机</th>
                 <th>性别</th>
-                <th>实名状态</th>
-                <th>身份证</th>
+                <th>认证状态</th>
+                <th>认证号</th>
                 <th>默认地址</th>
                 <th>最近登录</th>
                 <th>操作</th>
@@ -262,7 +268,7 @@ onMounted(loadData)
                 <td><a-tag :color="genderColor(read(record, 'gender', 'gender', 0))">{{ genderLabel(read(record, 'gender', 'gender', 0)) }}</a-tag></td>
                 <td>
                   <a-tag :color="realNameStatus(record) ? 'green' : 'gray'">
-                    {{ realNameStatus(record) ? '已实名' : '未实名' }}
+                    {{ realNameStatus(record) ? '已认证' : '未认证' }}
                   </a-tag>
                 </td>
                 <td>{{ mask(read(record, 'idCardNumber', 'id_card_number')) }}</td>
@@ -317,7 +323,7 @@ onMounted(loadData)
               </a-select>
             </a-form-item>
           </a-col>
-          <a-col :span="12"><a-form-item field="id_card_number" label="身份证号"><a-input v-model="form.id_card_number" /></a-form-item></a-col>
+          <a-col :span="12"><a-form-item field="id_card_number" label="认证号"><a-input v-model="form.id_card_number" placeholder="健康卡权益号/身份证号" /></a-form-item></a-col>
         </a-row>
         <a-row :gutter="16">
           <a-col :span="8"><a-form-item field="country" label="国家"><a-input v-model="form.country" /></a-form-item></a-col>
@@ -334,7 +340,7 @@ onMounted(loadData)
           <a-descriptions :column="2" bordered>
             <a-descriptions-item label="用户">{{ read(balanceUser, 'realName', 'real_name') || '-' }}</a-descriptions-item>
             <a-descriptions-item label="当前余额">{{ money(read(balanceInfo, 'balance', 'balance', 0)) }}</a-descriptions-item>
-            <a-descriptions-item label="小程序ID" :span="2">{{ miniAppId(balanceUser) || '-' }}</a-descriptions-item>
+            <a-descriptions-item label="认证号" :span="2">{{ mask(read(balanceUser, 'idCardNumber', 'id_card_number')) || '-' }}</a-descriptions-item>
           </a-descriptions>
           <a-divider>流水明细</a-divider>
           <div class="management-table-wrap">

@@ -3,7 +3,7 @@ use sha2::Sha256;
 
 pub fn recharge_request_hash(
     secret: &str,
-    openid: &str,
+    identity_no: &str,
     amount: i64,
     payment_password: &str,
 ) -> String {
@@ -12,7 +12,7 @@ pub fn recharge_request_hash(
         Ok(mac) => mac,
         Err(_) => unreachable!("HMAC accepts any key length"),
     };
-    mac.update(openid.as_bytes());
+    mac.update(identity_no.as_bytes());
     mac.update(b"|");
     mac.update(amount.to_string().as_bytes());
     mac.update(b"|");

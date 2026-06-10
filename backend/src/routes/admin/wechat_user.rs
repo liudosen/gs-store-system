@@ -6,6 +6,7 @@ use crate::models::wechat_user::{
 use crate::routes::admin::auth::authorize_admin;
 use crate::routes::admin::permissions::{WECHAT_USER_LIST_VIEW, WECHAT_USER_PASSWORD_VIEW};
 use crate::routes::ApiResponse;
+use crate::services::account;
 use crate::state::AppState;
 use axum::{extract::Path, extract::State, Json};
 use sqlx::{MySql, QueryBuilder};
@@ -39,13 +40,13 @@ fn append_wechat_user_filters(builder: &mut QueryBuilder<MySql>, query: &WechatU
         match real_name_status {
             1 => {
                 builder.push(
-                " AND TRIM(COALESCE(w.real_name, '')) <> '' \
+                    " AND TRIM(COALESCE(w.real_name, '')) <> '' \
                  AND TRIM(COALESCE(w.id_card_number, '')) <> ''",
                 );
             }
             0 => {
                 builder.push(
-                " AND (TRIM(COALESCE(w.real_name, '')) = '' \
+                    " AND (TRIM(COALESCE(w.real_name, '')) = '' \
                  OR TRIM(COALESCE(w.id_card_number, '')) = '')",
                 );
             }
@@ -184,7 +185,13 @@ pub async fn create_wechat_user(
     .bind(payload.province.as_deref().unwrap_or(""))
     .bind(payload.city.as_deref().unwrap_or(""))
     .bind(payload.gender.unwrap_or(0))
-    .bind(payload.id_card_number.as_deref().unwrap_or(""))
+    .bind(
+        payload
+            .id_card_number
+            .as_deref()
+            .map(account::normalize_identity_no)
+            .unwrap_or_default(),
+    )
     .execute(&state.db)
     .await?;
 
@@ -246,7 +253,7 @@ pub async fn update_wechat_user(
     }
     if let Some(ref v) = payload.id_card_number {
         updates.push("id_card_number = ?");
-        values.push(v.clone());
+        values.push(account::normalize_identity_no(v));
     }
 
     if updates.is_empty() {
@@ -321,7 +328,7 @@ pub async fn update_wechat_user_by_openid(
     }
     if let Some(ref v) = payload.id_card_number {
         updates.push("id_card_number = ?");
-        values.push(v.clone());
+        values.push(account::normalize_identity_no(v));
     }
 
     if updates.is_empty() {
@@ -356,13 +363,14 @@ pub async fn check_id_card_number_exists(
 ) -> Result<Json<ApiResponse<bool>>, AppError> {
     authorize_admin(&state, &headers, &[WECHAT_USER_LIST_VIEW]).await?;
 
-    if payload.id_card_number.is_empty() {
+    let identity_no = account::normalize_identity_no(&payload.id_card_number);
+    if identity_no.is_empty() {
         return Ok(Json(ApiResponse::success(false)));
     }
 
     let exists: Option<(u64,)> =
         sqlx::query_as("SELECT id FROM wechat_users WHERE id_card_number = ?")
-            .bind(&payload.id_card_number)
+            .bind(&identity_no)
             .fetch_optional(&state.db)
             .await?;
 

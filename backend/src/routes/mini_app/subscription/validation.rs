@@ -1,4 +1,5 @@
 use crate::error::AppError;
+use crate::services::account;
 use crate::state::AppState;
 
 #[derive(Debug)]
@@ -42,13 +43,16 @@ pub(super) async fn load_recharge_user(
     .await?
     .ok_or(AppError::NotFound("用户不存在".to_string()))?;
 
-    if user.id_card_number.is_empty() {
-        return Err(AppError::BadRequest("请先绑定身份证号后再充值".to_string()));
+    let identity_no = account::normalize_identity_no(&user.id_card_number);
+    if identity_no.is_empty() {
+        return Err(AppError::BadRequest(
+            "请先完成认证号认证后再充值".to_string(),
+        ));
     }
 
     Ok(RechargeUser {
         id: user.id,
-        id_card_number: user.id_card_number,
+        id_card_number: identity_no,
     })
 }
 

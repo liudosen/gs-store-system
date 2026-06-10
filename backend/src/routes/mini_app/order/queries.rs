@@ -2,6 +2,7 @@ use crate::error::AppError;
 use crate::models::order::{
     CreateOrderItemReq, OrderAddressSnap, OrderItemRow, OrderLogisticsRow, OrderRow,
 };
+use crate::services::account;
 use crate::state::AppState;
 use sqlx::Executor;
 
@@ -56,16 +57,16 @@ pub(super) struct ResolvedOrderItem {
 
 pub(super) async fn fetch_current_balance_on<'e, E>(
     executor: E,
-    openid: &str,
+    identity_no: &str,
 ) -> Result<i64, AppError>
 where
     E: Executor<'e, Database = sqlx::MySql>,
 {
     let balance: i64 = sqlx::query_scalar(
-        "SELECT COALESCE((SELECT balance FROM balance_accounts WHERE openid = ?), (SELECT balance_after FROM balance_transactions WHERE openid = ? ORDER BY id DESC LIMIT 1), 0)",
+        "SELECT COALESCE((SELECT balance FROM identity_balance_accounts WHERE identity_no = ?), (SELECT balance_after FROM identity_balance_transactions WHERE identity_no = ? ORDER BY id DESC LIMIT 1), 0)",
     )
-    .bind(openid)
-    .bind(openid)
+    .bind(identity_no)
+    .bind(identity_no)
     .fetch_one(executor)
     .await?;
 
@@ -155,7 +156,7 @@ pub(super) async fn fetch_user_id_card_number(
         .fetch_optional(&state.db)
         .await?
         .ok_or(AppError::NotFound("user not found".to_string()))?;
-    Ok(row.id_card_number)
+    Ok(account::normalize_identity_no(&row.id_card_number))
 }
 
 pub(super) async fn ensure_address_owned_by_user(

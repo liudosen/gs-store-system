@@ -11,7 +11,8 @@ struct ExistingRechargeOrder {
 }
 
 #[derive(sqlx::FromRow)]
-struct BalanceAfterRow {
+struct BalanceTransactionRow {
+    amount: i64,
     balance_after: i64,
 }
 
@@ -43,24 +44,30 @@ pub(super) async fn resolve_recharge_by_request_id(
             "Recharge is already in progress, please do not submit it again".to_string(),
         ))),
         3 => {
-            let balance = match fetch_balance_after_request(state, request_hash, 1).await? {
-                Some(balance) => balance,
-                None => account::current_balance(state, openid).await?,
-            };
+            let tx = fetch_balance_transaction_for_request(state, request_hash, 1).await?;
+            let balance = tx
+                .as_ref()
+                .map(|row| row.balance_after)
+                .unwrap_or(account::current_balance(state, openid).await?);
+            let amount = tx
+                .as_ref()
+                .map(|row| row.amount)
+                .unwrap_or(order.total_amount);
 
             Ok(Some(build_recharge_resp(
                 true,
                 balance,
-                order.total_amount,
-                amount_yuan,
+                amount,
+                amount as f64 / 100.0,
                 "Recharge successful".to_string(),
             )))
         }
         4 => {
-            let balance = match fetch_balance_after_request(state, request_hash, 0).await? {
-                Some(balance) => balance,
-                None => account::current_balance(state, openid).await?,
-            };
+            let tx = fetch_balance_transaction_for_request(state, request_hash, 0).await?;
+            let balance = tx
+                .as_ref()
+                .map(|row| row.balance_after)
+                .unwrap_or(account::current_balance(state, openid).await?);
 
             Ok(Some(build_recharge_resp(
                 false,
@@ -76,13 +83,13 @@ pub(super) async fn resolve_recharge_by_request_id(
     }
 }
 
-async fn fetch_balance_after_request(
+async fn fetch_balance_transaction_for_request(
     state: &AppState,
     request_hash: &str,
     status: i8,
-) -> Result<Option<i64>, AppError> {
-    let row = sqlx::query_as::<_, BalanceAfterRow>(
-        "SELECT balance_after FROM balance_transactions \
+) -> Result<Option<BalanceTransactionRow>, AppError> {
+    let row = sqlx::query_as::<_, BalanceTransactionRow>(
+        "SELECT amount, balance_after FROM identity_balance_transactions \
          WHERE request_hash = ? AND status = ? \
          ORDER BY id DESC LIMIT 1",
     )
@@ -91,7 +98,7 @@ async fn fetch_balance_after_request(
     .fetch_optional(&state.db)
     .await?;
 
-    Ok(row.map(|row| row.balance_after))
+    Ok(row)
 }
 
 fn build_recharge_resp(

@@ -135,6 +135,7 @@ mod tests {
     #[test]
     fn calc_jk_payment_amount_fen_matches_frontend_example() {
         assert_eq!(calc_jk_payment_amount_fen(59_900), 63_053);
+        assert_eq!(calc_jk_payment_amount_fen(71_579), 75_346);
         assert_eq!(calc_jk_payment_amount_fen(100), 105);
         assert_eq!(calc_jk_payment_amount_fen(1), 1);
     }

@@ -53,13 +53,13 @@ pub async fn get_my_health_card_balance(
 
     if real_name.trim().is_empty() {
         return Err(AppError::BadRequest(
-            "请先完成实名认证后再查询健康卡余额".to_string(),
+            "请先完成认证号认证后再查询健康卡余额".to_string(),
         ));
     }
 
     if id_card_number.trim().is_empty() {
         return Err(AppError::BadRequest(
-            "请先绑定身份证号后再查询健康卡余额".to_string(),
+            "请先绑定认证号后再查询健康卡余额".to_string(),
         ));
     }
 

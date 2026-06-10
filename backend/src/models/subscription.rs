@@ -89,26 +89,28 @@ pub struct SetSubscriptionRequest {
     pub action: i8, // 0=关闭, 1=开启
 }
 
-// ─── balance_accounts ────────────────────────────────────────────────────────
+// ─── identity_balance_accounts ───────────────────────────────────────────────
 
-/// DB 行：储值账户
+/// DB 行：认证号储值账户
 #[allow(dead_code)]
 #[derive(Debug, Clone, FromRow)]
 pub struct BalanceAccount {
     pub id: u64,
+    /// Backward-compatible field name; identity balance queries map identity_no into it.
     pub openid: String,
     pub balance: i64,
     pub created_at: NaiveDateTime,
     pub updated_at: NaiveDateTime,
 }
 
-// ─── balance_transactions ────────────────────────────────────────────────────
+// ─── identity_balance_transactions ───────────────────────────────────────────
 
-/// DB 行：流水记录
+/// DB 行：认证号余额流水记录
 #[derive(Debug, Clone, FromRow)]
 pub struct BalanceTransaction {
     pub id: u64,
     #[allow(dead_code)]
+    /// Backward-compatible field name; identity balance queries map identity_no into it.
     pub openid: String,
     pub amount: i64,
     pub balance_after: i64,

@@ -8,7 +8,7 @@ const auth = useAuthStore()
 const recharging = ref(false)
 const loading = ref(false)
 const balanceInfo = ref(null)
-const form = reactive({ openid: '' })
+const form = reactive({ identity_no: '' })
 
 const canExecuteAutoRecharge = computed(() => auth.accessCodes.includes('subscription:auto-recharge:execute'))
 
@@ -48,16 +48,16 @@ function autoRecharge() {
 }
 
 async function queryBalance() {
-  const openid = form.openid.trim()
-  if (!openid) {
-    Message.warning('请输入小程序ID / openId')
+  const identityNo = form.identity_no.trim()
+  if (!identityNo) {
+    Message.warning('请输入认证号')
     return
   }
 
   loading.value = true
   balanceInfo.value = null
   try {
-    balanceInfo.value = await fetchBalanceTransactions(openid)
+    balanceInfo.value = await fetchBalanceTransactions(identityNo)
   } catch (error) {
     Message.error(error.message || '余额流水加载失败')
   } finally {
@@ -80,11 +80,11 @@ async function queryBalance() {
         </section>
         <section class="operation-panel">
           <strong>余额流水查询</strong>
-          <p>输入用户小程序 ID 查看当前余额与最近充值、扣款流水。</p>
+          <p>输入认证号查看当前余额与最近充值、扣款流水。</p>
           <a-space wrap>
             <a-input-search
-              v-model="form.openid"
-              placeholder="小程序ID / openId"
+              v-model="form.identity_no"
+              placeholder="健康卡权益号/身份证号"
               allow-clear
               style="width: 320px"
               @search="queryBalance"
@@ -98,10 +98,10 @@ async function queryBalance() {
     <a-card :bordered="false" class="page-card">
       <template #title>余额流水</template>
       <a-spin :loading="loading" style="width: 100%">
-        <a-empty v-if="!balanceInfo" class="table-empty" description="请输入小程序ID后查询余额流水" />
+        <a-empty v-if="!balanceInfo" class="table-empty" description="请输入认证号后查询余额流水" />
         <template v-else>
           <a-descriptions :column="2" bordered>
-            <a-descriptions-item label="小程序ID">{{ form.openid }}</a-descriptions-item>
+            <a-descriptions-item label="认证号">{{ form.identity_no }}</a-descriptions-item>
             <a-descriptions-item label="当前余额">{{ money(read(balanceInfo, 'balance', 'balance', 0)) }}</a-descriptions-item>
           </a-descriptions>
           <a-divider>流水明细</a-divider>

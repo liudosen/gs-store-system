@@ -2,14 +2,11 @@ use crate::error::AppError;
 use crate::models::order::{BalancePayRequest, BalancePayResp, PayOrderRequest};
 use crate::routes::mini_app::order::{guards, mapping, queries, PayOrderResp};
 use crate::routes::ApiResponse;
-use crate::services::jk_pay;
+use crate::services::{account, jk_pay};
 use crate::state::AppState;
 use axum::Json;
 
-pub(crate) fn calc_balance_payment_amount(
-    total_amount_fen: i64,
-    discount_amount_fen: i64,
-) -> i64 {
+pub(crate) fn calc_balance_payment_amount(total_amount_fen: i64, discount_amount_fen: i64) -> i64 {
     let payable_amount_fen = total_amount_fen
         .max(0)
         .saturating_sub(discount_amount_fen.max(0))
@@ -33,7 +30,8 @@ pub(super) async fn pay_order_with_balance_impl(
     _body: BalancePayRequest,
 ) -> Result<Json<ApiResponse<BalancePayResp>>, AppError> {
     let user_id = queries::get_user_id_by_openid(state, openid).await?;
-    let lock_key = format!("balance_pay:{openid}");
+    let identity_no = account::identity_no_by_openid(state, openid).await?;
+    let lock_key = format!("balance_pay:{identity_no}");
     let mut tx = state.db.begin().await?;
 
     let lock_acquired: Option<i32> = sqlx::query_scalar("SELECT GET_LOCK(?, 5)")
@@ -49,7 +47,7 @@ pub(super) async fn pay_order_with_balance_impl(
 
     let result = async {
         let order = queries::fetch_owned_order(state, id, user_id).await?;
-        let current_balance = queries::fetch_current_balance_on(&mut *tx, openid).await?;
+        let current_balance = queries::fetch_current_balance_on(&mut *tx, &identity_no).await?;
 
         if order.status != 0 {
             return Ok(Json(ApiResponse::success(mapping::build_balance_pay_resp(
@@ -92,16 +90,17 @@ pub(super) async fn pay_order_with_balance_impl(
         }
 
         sqlx::query(
-            "INSERT INTO balance_accounts (openid, balance) VALUES (?, ?) ON DUPLICATE KEY UPDATE balance = VALUES(balance), updated_at = NOW()",
+            "INSERT INTO identity_balance_accounts (identity_no, balance) VALUES (?, ?) ON DUPLICATE KEY UPDATE balance = VALUES(balance), updated_at = NOW()",
         )
-        .bind(openid)
+        .bind(&identity_no)
         .bind(balance_after)
         .execute(&mut *tx)
         .await?;
 
         sqlx::query(
-            "INSERT INTO balance_transactions (openid, amount, balance_after, `type`, external_order_no, status, remark) VALUES (?, ?, ?, 2, ?, 1, 'order balance payment')",
+            "INSERT INTO identity_balance_transactions (identity_no, source_openid, amount, balance_after, `type`, external_order_no, status, remark) VALUES (?, ?, ?, ?, 2, ?, 1, 'order balance payment')",
         )
+        .bind(&identity_no)
         .bind(openid)
         .bind(balance_paid_amount)
         .bind(balance_after)
@@ -155,7 +154,7 @@ pub(super) async fn pay_order_impl(
 
         let id_card_number = queries::fetch_user_id_card_number(state, openid).await?;
         if id_card_number.is_empty() {
-            let fail_msg = "health card id not found, complete profile before payment";
+            let fail_msg = "认证号未绑定，请先完成认证后再支付";
             sqlx::query("UPDATE orders SET remark = ? WHERE id = ?")
                 .bind(fail_msg)
                 .bind(id)

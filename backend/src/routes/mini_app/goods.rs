@@ -43,8 +43,26 @@ pub async fn list_goods(
     let page_size = q.page_size.unwrap_or(20).min(100);
     let offset = (page_index - 1) * page_size;
 
-    let category_id = q.category_id.clone();
-    let keyword = q.keyword.clone();
+    let category_id = q.category_id.as_deref().and_then(|value| {
+        let value = value.trim();
+        if value.is_empty()
+            || value == "0"
+            || value.eq_ignore_ascii_case("undefined")
+            || value.eq_ignore_ascii_case("null")
+        {
+            None
+        } else {
+            Some(value.to_string())
+        }
+    });
+    let keyword = q.keyword.as_deref().and_then(|value| {
+        let value = value.trim();
+        if value.is_empty() {
+            None
+        } else {
+            Some(value.to_string())
+        }
+    });
 
     let mut conditions = vec!["status = 1"];
     if category_id.is_some() {

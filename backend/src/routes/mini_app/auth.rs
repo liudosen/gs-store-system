@@ -1,6 +1,7 @@
 use crate::error::AppError;
 use crate::models::WechatUser;
 use crate::routes::ApiResponse;
+use crate::services::account;
 use crate::state::{AppState, MiniAppAuthConfig};
 use axum::{extract::State, Json};
 use chrono::{Duration, Utc};
@@ -352,7 +353,9 @@ pub async fn check_my_id_card(
             .fetch_optional(&state.db)
             .await?;
 
-    let result = id_card.filter(|s| !s.is_empty());
+    let result = id_card
+        .map(|s| account::normalize_identity_no(&s))
+        .filter(|s| !s.is_empty());
 
     Ok(Json(ApiResponse::success(result)))
 }
@@ -379,6 +382,55 @@ pub struct UpdateMyUserRequest {
     pub real_name: Option<String>,
     pub phone: Option<String>,
     pub id_card_number: Option<String>,
+    pub identity_type: Option<String>,
+}
+
+fn infer_identity_type(identity_no: &str) -> &'static str {
+    if identity_no.len() == 19 {
+        "health_card"
+    } else {
+        "id_card"
+    }
+}
+
+fn normalize_identity_type(identity_type: Option<&str>, identity_no: &str) -> &'static str {
+    match identity_type.unwrap_or_default().trim() {
+        "health_card" => "health_card",
+        "id_card" => "id_card",
+        _ => infer_identity_type(identity_no),
+    }
+}
+
+fn validate_identity_no(identity_type: &str, identity_no: &str) -> Result<(), AppError> {
+    match identity_type {
+        "health_card" => {
+            let valid =
+                identity_no.len() == 19 && identity_no.chars().all(|c| c.is_ascii_alphanumeric());
+            if valid {
+                Ok(())
+            } else {
+                Err(AppError::BadRequest(
+                    "健康卡权益号需为19位字母或数字".to_string(),
+                ))
+            }
+        }
+        _ => {
+            let mut chars = identity_no.chars();
+            let prefix_valid = chars.by_ref().take(17).all(|c| c.is_ascii_digit());
+            let suffix_valid = chars
+                .next()
+                .map(|c| c.is_ascii_digit() || c == 'X')
+                .unwrap_or(false);
+            let no_extra = chars.next().is_none();
+            if identity_no.len() == 18 && prefix_valid && suffix_valid && no_extra {
+                Ok(())
+            } else {
+                Err(AppError::BadRequest(
+                    "身份证号需为18位，末位可为X".to_string(),
+                ))
+            }
+        }
+    }
 }
 
 pub async fn update_my_userinfo(
@@ -408,8 +460,11 @@ pub async fn update_my_userinfo(
         values.push(v.clone());
     }
     if let Some(ref v) = payload.id_card_number {
+        let identity_no = account::normalize_identity_no(v);
+        let identity_type = normalize_identity_type(payload.identity_type.as_deref(), &identity_no);
+        validate_identity_no(identity_type, &identity_no)?;
         updates.push("id_card_number = ?");
-        values.push(v.clone());
+        values.push(identity_no);
     }
 
     if updates.is_empty() {

@@ -28,7 +28,7 @@ export function checkIdCard(data) { return http.post('/api/admin/wechat/users/ch
 export function fetchPaymentPassword(openid) { return http.get(`/api/admin/wechat/users/${openid}/payment-password`) }
 export function fetchSubscriptionRecords(params) { return http.get('/api/admin/subscription/records', { params }) }
 export function triggerAutoRecharge() { return http.post('/api/admin/subscription/auto-recharge') }
-export function fetchBalance(openid) { return http.get(`/api/admin/wechat/users/${openid}/balance`) }
-export function fetchBalanceTransactions(openid) { return http.get(`/api/admin/wechat/users/${openid}/balance/transactions`) }
+export function fetchBalance(identityNo) { return http.get(`/api/admin/balances/${encodeURIComponent(identityNo)}`) }
+export function fetchBalanceTransactions(identityNo) { return http.get(`/api/admin/balances/${encodeURIComponent(identityNo)}/transactions`) }
 export function fetchRecentLogs(params) { return http.get('/api/admin/logs/recent', { params }) }
 export function fetchUploadSignature(filename) { return http.get('/api/admin/upload/signature', { params: { filename } }) }

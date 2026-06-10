@@ -134,6 +134,14 @@ fn admin_routes() -> Router<Arc<AppState>> {
             "/api/admin/wechat/users/{openid}/balance/transactions",
             get(admin_subscription::get_user_transactions),
         )
+        .route(
+            "/api/admin/balances/{identity_no}",
+            get(admin_subscription::get_identity_balance),
+        )
+        .route(
+            "/api/admin/balances/{identity_no}/transactions",
+            get(admin_subscription::get_identity_transactions),
+        )
 }
 
 fn mini_app_routes() -> Router<Arc<AppState>> {

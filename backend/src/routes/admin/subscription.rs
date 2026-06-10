@@ -22,6 +22,7 @@ use axum::{
     Json,
 };
 use sqlx::{MySql, QueryBuilder};
+use std::collections::HashSet;
 use std::sync::Arc;
 
 /// POST /api/admin/subscription/auto-recharge
@@ -38,9 +39,16 @@ pub async fn auto_recharge(
 
     let total = users.len();
     let mut summary = auto_recharge::AutoRechargeSummary::new(total);
+    let mut processed_identities = HashSet::new();
 
     for user in users {
         let openid = user.openid.clone();
+        let identity_no = account::normalize_identity_no(&user.id_card_number);
+        if identity_no.is_empty() {
+            summary.record_skip();
+            continue;
+        }
+
         let latest_action = auto_recharge::latest_subscription_action(&state, &openid).await?;
 
         if latest_action != Some(1) {
@@ -48,6 +56,16 @@ pub async fn auto_recharge(
                 "[AutoRecharge] openid={} skipped (action={:?})",
                 openid,
                 latest_action
+            );
+            summary.record_skip();
+            continue;
+        }
+
+        if !processed_identities.insert(identity_no.clone()) {
+            tracing::info!(
+                "[AutoRecharge] openid={} identity_no={} skipped (identity already processed)",
+                openid,
+                identity_no
             );
             summary.record_skip();
             continue;
@@ -63,15 +81,17 @@ pub async fn auto_recharge(
                 }
             };
 
-        if payment_password.is_empty() || user.id_card_number.is_empty() {
+        if payment_password.is_empty() || identity_no.is_empty() {
             summary.record_skip();
             continue;
         }
 
-        let request_hash = auto_recharge::build_request_hash(&state, &openid, &payment_password);
+        let request_hash =
+            auto_recharge::build_request_hash(&state, &identity_no, &payment_password);
 
         if let Some((_balance_after, external_order_no)) =
-            auto_recharge::resolve_existing_auto_recharge(&state, &openid, &request_hash).await?
+            auto_recharge::resolve_existing_auto_recharge(&state, &identity_no, &request_hash)
+                .await?
         {
             tracing::info!(
                 "[AutoRecharge] openid={} reused existing successful recharge",
@@ -131,7 +151,7 @@ pub async fn auto_recharge(
         tx.commit().await?;
 
         let mut redis_conn = state.redis_conn().await?;
-        let pay_result = jk_pay::jk_pay(
+        let pay_result = jk_pay::jk_pay_exact_amount(
             &mut redis_conn,
             &state.jk_seller_username,
             &state.jk_seller_password,
@@ -143,12 +163,24 @@ pub async fn auto_recharge(
 
         if pay_result.success {
             let mut tx = state.db.begin().await?;
+            let credited_amount = pay_result.paid_amount.max(0);
+            let success_remark = if credited_amount == auto_recharge::AUTO_RECHARGE_AMOUNT {
+                "auto recharge success".to_string()
+            } else {
+                format!(
+                    "auto recharge success with actual deduction: requested={:.2}, paid={:.2}, credited={:.2}",
+                    auto_recharge::AUTO_RECHARGE_AMOUNT as f64 / 100.0,
+                    pay_result.paid_amount as f64 / 100.0,
+                    credited_amount as f64 / 100.0
+                )
+            };
 
             let updated = sqlx::query(
-                "UPDATE orders SET status = 3, paid_amount = ?, external_order_no = ? WHERE id = ? AND request_hash = ? AND status = 0",
+                "UPDATE orders SET status = 3, paid_amount = ?, external_order_no = ?, remark = ? WHERE id = ? AND request_hash = ? AND status = 0",
             )
             .bind(pay_result.paid_amount)
             .bind(&pay_result.external_order_no)
+            .bind(&success_remark)
             .bind(order_id)
             .bind(&request_hash)
             .execute(&mut *tx)
@@ -158,8 +190,12 @@ pub async fn auto_recharge(
                 tx.rollback().await?;
 
                 if let Some((_balance_after, external_order_no)) =
-                    auto_recharge::resolve_existing_auto_recharge(&state, &openid, &request_hash)
-                        .await?
+                    auto_recharge::resolve_existing_auto_recharge(
+                        &state,
+                        &identity_no,
+                        &request_hash,
+                    )
+                    .await?
                 {
                     summary.record_success(openid.clone(), external_order_no);
                     continue;
@@ -171,25 +207,30 @@ pub async fn auto_recharge(
             }
 
             sqlx::query(
-                "INSERT INTO balance_accounts (openid, balance) VALUES (?, ?) \
+                "INSERT INTO identity_balance_accounts (identity_no, balance) VALUES (?, ?) \
                  ON DUPLICATE KEY UPDATE balance = balance + ?, updated_at = NOW()",
             )
-            .bind(&openid)
-            .bind(auto_recharge::AUTO_RECHARGE_AMOUNT)
-            .bind(auto_recharge::AUTO_RECHARGE_AMOUNT)
+            .bind(&identity_no)
+            .bind(credited_amount)
+            .bind(credited_amount)
             .execute(&mut *tx)
             .await?;
 
-            let balance_after = account::current_balance(&state, &openid).await?
-                + auto_recharge::AUTO_RECHARGE_AMOUNT;
+            let balance_after: i64 = sqlx::query_scalar(
+                "SELECT balance FROM identity_balance_accounts WHERE identity_no = ?",
+            )
+            .bind(&identity_no)
+            .fetch_one(&mut *tx)
+            .await?;
 
             sqlx::query(
-                "INSERT INTO balance_transactions \
-                 (openid, amount, balance_after, `type`, external_order_no, status, remark, request_hash) \
-                 VALUES (?, ?, ?, 1, ?, 1, '自动充值成功', ?)",
+                "INSERT INTO identity_balance_transactions \
+                 (identity_no, source_openid, amount, balance_after, `type`, external_order_no, status, remark, request_hash) \
+                 VALUES (?, ?, ?, ?, 1, ?, 1, '自动充值成功', ?)",
             )
+            .bind(&identity_no)
             .bind(&openid)
-            .bind(auto_recharge::AUTO_RECHARGE_AMOUNT)
+            .bind(credited_amount)
             .bind(balance_after)
             .bind(&pay_result.external_order_no)
             .bind(&request_hash)
@@ -211,7 +252,7 @@ pub async fn auto_recharge(
                 .fail_reason
                 .unwrap_or_else(|| "扣款失败".to_string());
 
-            let balance_now = account::current_balance(&state, &openid).await?;
+            let balance_now = account::current_balance_by_identity_no(&state, &identity_no).await?;
 
             let mut tx = state.db.begin().await?;
             sqlx::query(
@@ -224,10 +265,11 @@ pub async fn auto_recharge(
             .await?;
 
             sqlx::query(
-                "INSERT INTO balance_transactions \
-                 (openid, amount, balance_after, `type`, external_order_no, status, remark, request_hash) \
-                 VALUES (?, ?, ?, 1, NULL, 0, ?, ?)",
+                "INSERT INTO identity_balance_transactions \
+                 (identity_no, source_openid, amount, balance_after, `type`, external_order_no, status, remark, request_hash) \
+                 VALUES (?, ?, ?, ?, 1, NULL, 0, ?, ?)",
             )
+            .bind(&identity_no)
             .bind(&openid)
             .bind(auto_recharge::AUTO_RECHARGE_AMOUNT)
             .bind(balance_now)
@@ -380,10 +422,29 @@ pub async fn get_user_balance(
 ) -> Result<Json<ApiResponse<serde_json::Value>>, AppError> {
     authorize_admin(&state, &headers, &[SUBSCRIPTION_VIEW]).await?;
 
-    let balance = account::current_balance(&state, &openid).await?;
+    let identity_no = account::identity_no_by_openid(&state, &openid).await?;
+    let balance = account::current_balance_by_identity_no(&state, &identity_no).await?;
 
     Ok(Json(ApiResponse::success(serde_json::json!({
         "openid": openid,
+        "identityNo": identity_no,
+        "balance": balance
+    }))))
+}
+
+/// GET /api/admin/balances/{identity_no}
+pub async fn get_identity_balance(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Path(identity_no): Path<String>,
+) -> Result<Json<ApiResponse<serde_json::Value>>, AppError> {
+    authorize_admin(&state, &headers, &[SUBSCRIPTION_VIEW]).await?;
+
+    let identity_no = account::normalize_identity_no(&identity_no);
+    let balance = account::current_balance_by_identity_no(&state, &identity_no).await?;
+
+    Ok(Json(ApiResponse::success(serde_json::json!({
+        "identityNo": identity_no,
         "balance": balance
     }))))
 }
@@ -396,8 +457,28 @@ pub async fn get_user_transactions(
 ) -> Result<Json<ApiResponse<BalanceResp>>, AppError> {
     authorize_admin(&state, &headers, &[SUBSCRIPTION_VIEW]).await?;
 
-    let balance = account::current_balance(&state, &openid).await?;
-    let txs = account::recent_balance_transactions(&state, &openid, 200).await?;
+    let identity_no = account::identity_no_by_openid(&state, &openid).await?;
+    load_identity_transactions(&state, &identity_no).await
+}
+
+/// GET /api/admin/balances/{identity_no}/transactions
+pub async fn get_identity_transactions(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Path(identity_no): Path<String>,
+) -> Result<Json<ApiResponse<BalanceResp>>, AppError> {
+    authorize_admin(&state, &headers, &[SUBSCRIPTION_VIEW]).await?;
+
+    load_identity_transactions(&state, &identity_no).await
+}
+
+async fn load_identity_transactions(
+    state: &AppState,
+    identity_no: &str,
+) -> Result<Json<ApiResponse<BalanceResp>>, AppError> {
+    let identity_no = account::normalize_identity_no(identity_no);
+    let balance = account::current_balance_by_identity_no(state, &identity_no).await?;
+    let txs = account::recent_balance_transactions_by_identity_no(state, &identity_no, 200).await?;
 
     Ok(Json(ApiResponse::success(BalanceResp {
         balance,

@@ -20,6 +20,12 @@ pub(super) fn calc_jk_payment_amount_fen(total_amount_fen: i64) -> i64 {
     ((total_amount_fen as f64) / 0.95).round() as i64
 }
 
+fn calc_jk_order_payment_amounts_fen(order_amount_fen: i64) -> (i64, i64) {
+    let target_account_amount_fen = calc_jk_payment_amount_fen(order_amount_fen);
+    let trade_amount_fen = calc_jk_payment_amount_fen(target_account_amount_fen);
+    (target_account_amount_fen, trade_amount_fen)
+}
+
 fn parse_money_value(value: Option<&Value>) -> Option<f64> {
     let value = value?;
     if let Some(n) = value.as_f64() {
@@ -379,6 +385,7 @@ async fn try_pay_with_password(
     card_password: &str,
     order_no: &str,
     amount_yuan: f64,
+    target_account_amount_yuan: f64,
     line: &Value,
 ) -> Result<PayResult, String> {
     let (enc_pwd, _channel_balance) =
@@ -404,15 +411,23 @@ async fn try_pay_with_password(
         extract_first_money_field(&pr, &["cashAmount", "cashPayAmount", "selfPayAmount"])
             .unwrap_or(0.0);
     if precalc_cash_amount > 0.01 {
+        tracing::warn!(
+            "[JK Pay] preCalc returned cash complement: account_amount={:.2} cash_amount={:.2} target_amount={:.2}",
+            precalc_account_amount,
+            precalc_cash_amount,
+            target_account_amount_yuan
+        );
+    }
+    if precalc_account_amount + 0.01 < target_account_amount_yuan {
         return Err(format!(
-            "第三方返回现金补差，已拒绝支付：账户支付 {:.2} 元，现金支付 {:.2} 元，应付 {:.2} 元",
-            precalc_account_amount, precalc_cash_amount, amount_yuan
+            "健康卡预计算未达目标，未发起扣款：账户支付 {:.2} 元，目标扣款 {:.2} 元",
+            precalc_account_amount, target_account_amount_yuan
         ));
     }
-    if precalc_account_amount + 0.01 < amount_yuan {
+    if precalc_account_amount > target_account_amount_yuan + 0.01 {
         return Err(format!(
-            "健康卡余额不足：账户支付 {:.2} 元，应付 {:.2} 元",
-            precalc_account_amount, amount_yuan
+            "健康卡预计算金额异常，未发起扣款：账户支付 {:.2} 元，目标扣款 {:.2} 元",
+            precalc_account_amount, target_account_amount_yuan
         ));
     }
 
@@ -435,11 +450,33 @@ async fn try_pay_with_password(
     let cash_amount =
         extract_first_money_field(&r, &["cashAmount", "cashPayAmount", "selfPayAmount"])
             .unwrap_or(0.0);
-    let pay_success = r.get("success").and_then(|v| v.as_bool()) == Some(true)
-        && deduct_amount + 0.01 >= amount_yuan
-        && cash_amount <= 0.01;
+    let third_party_success = r.get("success").and_then(|v| v.as_bool()) == Some(true);
 
-    if pay_success {
+    if deduct_amount > 0.01 {
+        if !third_party_success {
+            tracing::error!(
+                "[JK Pay] third-party returned non-success with positive deduction; recording actual deduction to avoid ledger drift: account_amount={:.2} target_amount={:.2} order_no={}",
+                deduct_amount,
+                target_account_amount_yuan,
+                order_no
+            );
+        }
+        if cash_amount > 0.01 {
+            tracing::warn!(
+                "[JK Pay] accepting successful account payment with cash complement: account_amount={:.2} cash_amount={:.2} target_amount={:.2}",
+                deduct_amount,
+                cash_amount,
+                target_account_amount_yuan
+            );
+        }
+        if !is_exact_account_payment(deduct_amount, target_account_amount_yuan) {
+            tracing::error!(
+                "[JK Pay] third-party deducted non-target amount; recording actual deduction to avoid ledger drift: account_amount={:.2} target_amount={:.2} order_no={}",
+                deduct_amount,
+                target_account_amount_yuan,
+                order_no
+            );
+        }
         let paid_amount_fen = (deduct_amount * 100.0).round() as i64;
 
         Ok(PayResult {
@@ -450,15 +487,26 @@ async fn try_pay_with_password(
             fail_reason: None,
         })
     } else {
-        let msg = if cash_amount > 0.01 {
+        let msg = if deduct_amount <= 0.01 {
+            r.get("returnMsg")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string())
+                .or_else(|| {
+                    pay_data
+                        .pointer("/stat/stateList")
+                        .and_then(|v| v.as_str())
+                        .map(|s| s.to_string())
+                })
+                .unwrap_or_else(|| "支付失败，第三方未返回实际扣款".to_string())
+        } else if deduct_amount + 0.01 < target_account_amount_yuan {
             format!(
-                "第三方返回现金补差，已拒绝确认：账户支付 {:.2} 元，现金支付 {:.2} 元，应付 {:.2} 元",
-                deduct_amount, cash_amount, amount_yuan
+                "健康卡扣款低于目标但已记录实扣：账户支付 {:.2} 元，目标扣款 {:.2} 元",
+                deduct_amount, target_account_amount_yuan
             )
-        } else if deduct_amount + 0.01 < amount_yuan {
+        } else if deduct_amount > target_account_amount_yuan + 0.01 {
             format!(
-                "健康卡余额不足：账户支付 {:.2} 元，应付 {:.2} 元",
-                deduct_amount, amount_yuan
+                "健康卡扣款高于目标但已记录实扣：账户支付 {:.2} 元，目标扣款 {:.2} 元",
+                deduct_amount, target_account_amount_yuan
             )
         } else {
             r.get("returnMsg")
@@ -477,6 +525,10 @@ async fn try_pay_with_password(
     }
 }
 
+fn is_exact_account_payment(deduct_amount: f64, target_amount: f64) -> bool {
+    deduct_amount + 0.01 >= target_amount && deduct_amount <= target_amount + 0.01
+}
+
 pub(super) async fn do_jk_pay<C>(
     redis: &mut C,
     seller_username: &str,
@@ -488,7 +540,14 @@ pub(super) async fn do_jk_pay<C>(
 where
     C: ConnectionLike + Send,
 {
-    let deduct_amount_fen = calc_jk_payment_amount_fen(total_amount_fen);
+    let (target_account_amount_fen, deduct_amount_fen) =
+        calc_jk_order_payment_amounts_fen(total_amount_fen);
+    tracing::info!(
+        "[JK Pay] order_amount_fen={} target_account_amount_fen={} trade_amount_fen={}",
+        total_amount_fen,
+        target_account_amount_fen,
+        deduct_amount_fen
+    );
     do_jk_pay_with_deduct_amount(
         redis,
         seller_username,
@@ -496,7 +555,7 @@ where
         card_no,
         card_password,
         deduct_amount_fen,
-        Some(total_amount_fen),
+        Some(target_account_amount_fen),
     )
     .await
 }
@@ -507,11 +566,12 @@ pub(super) async fn do_jk_pay_exact_amount<C>(
     seller_password: &str,
     card_no: &str,
     card_password: &str,
-    deduct_amount_fen: i64,
+    target_amount_fen: i64,
 ) -> Result<PayResult, String>
 where
     C: ConnectionLike + Send,
 {
+    let deduct_amount_fen = calc_jk_payment_amount_fen(target_amount_fen);
     do_jk_pay_with_deduct_amount(
         redis,
         seller_username,
@@ -519,7 +579,7 @@ where
         card_no,
         card_password,
         deduct_amount_fen,
-        None,
+        Some(target_amount_fen),
     )
     .await
 }
@@ -541,6 +601,8 @@ where
     }
 
     let amount_yuan = deduct_amount_fen as f64 / 100.0;
+    let target_account_amount_fen = source_amount_fen.unwrap_or(deduct_amount_fen);
+    let target_account_amount_yuan = target_account_amount_fen as f64 / 100.0;
     let started = Instant::now();
 
     if let Some(source_amount_fen) = source_amount_fen {
@@ -605,6 +667,7 @@ where
             card_password,
             &order_no,
             amount_yuan,
+            target_account_amount_yuan,
             &line,
         )
         .await
@@ -681,4 +744,33 @@ where
     }
 
     Err(last_err.unwrap_or_else(|| "第三方未返回健康卡余额".to_string()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{calc_jk_order_payment_amounts_fen, is_exact_account_payment};
+
+    #[test]
+    fn exact_account_payment_accepts_cent_tolerance() {
+        assert!(is_exact_account_payment(680.00, 680.00));
+        assert!(is_exact_account_payment(715.79, 715.79));
+        assert!(is_exact_account_payment(715.80, 715.79));
+    }
+
+    #[test]
+    fn non_exact_account_payment_is_reconciliation_case() {
+        assert!(!is_exact_account_payment(68.08, 715.79));
+        assert!(!is_exact_account_payment(753.46, 715.79));
+    }
+
+    #[test]
+    fn positive_deduction_must_be_recorded_even_when_non_exact() {
+        assert!(68.08 > 0.01);
+        assert!(753.46 > 0.01);
+    }
+
+    #[test]
+    fn order_payment_targets_real_health_card_deduction() {
+        assert_eq!(calc_jk_order_payment_amounts_fen(68_000), (71_579, 75_346));
+    }
 }

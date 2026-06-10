@@ -116,7 +116,7 @@ onMounted(loadData)
                 <td><span class="strong-text">{{ read(record, 'id', 'id') }}</span></td>
                 <td>
                   <div class="user-identity-cell">
-                    <strong>{{ read(record, 'realName', 'real_name') || '未实名用户' }}</strong>
+                    <strong>{{ read(record, 'realName', 'real_name') || '未认证用户' }}</strong>
                     <span>{{ read(record, 'phone', 'phone') || '-' }}</span>
                   </div>
                 </td>

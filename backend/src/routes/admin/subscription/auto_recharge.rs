@@ -111,7 +111,7 @@ pub(super) async fn load_eligible_users(state: &AppState) -> Result<Vec<Eligible
         .into_iter()
         .map(|user| EligibleUser {
             openid: user.openid,
-            id_card_number: user.id_card_number,
+            id_card_number: account::normalize_identity_no(&user.id_card_number),
         })
         .collect())
 }
@@ -130,10 +130,14 @@ pub(super) async fn latest_subscription_action(
     Ok(latest_action)
 }
 
-pub(super) fn build_request_hash(state: &AppState, openid: &str, payment_password: &str) -> String {
+pub(super) fn build_request_hash(
+    state: &AppState,
+    identity_no: &str,
+    payment_password: &str,
+) -> String {
     secret::recharge_request_hash(
         &state.jwt_secret,
-        openid,
+        identity_no,
         AUTO_RECHARGE_AMOUNT,
         payment_password,
     )
@@ -141,7 +145,7 @@ pub(super) fn build_request_hash(state: &AppState, openid: &str, payment_passwor
 
 pub(super) async fn resolve_existing_auto_recharge(
     state: &AppState,
-    openid: &str,
+    identity_no: &str,
     request_hash: &str,
 ) -> Result<Option<(i64, Option<String>)>, AppError> {
     let existing = sqlx::query_as::<_, ExistingRechargeOrder>(
@@ -161,7 +165,7 @@ pub(super) async fn resolve_existing_auto_recharge(
         )),
         3 => {
             let tx = sqlx::query_as::<_, TxRow>(
-                "SELECT balance_after FROM balance_transactions \
+                "SELECT balance_after FROM identity_balance_transactions \
                  WHERE request_hash = ? AND status = 1 \
                  ORDER BY id DESC LIMIT 1",
             )
@@ -171,7 +175,7 @@ pub(super) async fn resolve_existing_auto_recharge(
 
             let balance = match tx {
                 Some(row) => row.balance_after,
-                None => account::current_balance(state, openid).await?,
+                None => account::current_balance_by_identity_no(state, identity_no).await?,
             };
 
             Ok(Some((balance, order.external_order_no)))

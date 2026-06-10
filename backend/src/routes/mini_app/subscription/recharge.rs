@@ -22,6 +22,7 @@ pub(super) async fn process_recharge(
     request_hash: &str,
     started: Instant,
 ) -> Result<RechargeResp, AppError> {
+    let identity_no = &user.id_card_number;
     let order = create_recharge_order(state, user.id, amount, request_hash).await?;
 
     let mut redis_conn = state.redis_conn().await?;
@@ -39,6 +40,7 @@ pub(super) async fn process_recharge(
         finalize_recharge_success(
             state,
             openid,
+            identity_no,
             request_hash,
             &order,
             amount,
@@ -53,8 +55,17 @@ pub(super) async fn process_recharge(
             .fail_reason
             .unwrap_or_else(|| "充值失败".to_string());
 
-        finalize_recharge_failure(state, openid, request_hash, &order, amount, reason, started)
-            .await
+        finalize_recharge_failure(
+            state,
+            openid,
+            identity_no,
+            request_hash,
+            &order,
+            amount,
+            reason,
+            started,
+        )
+        .await
     }
 }
 
@@ -129,6 +140,7 @@ async fn create_recharge_order(
 async fn finalize_recharge_success(
     state: &AppState,
     openid: &str,
+    identity_no: &str,
     request_hash: &str,
     order: &RechargeOrderContext,
     amount: i64,
@@ -139,16 +151,28 @@ async fn finalize_recharge_success(
 ) -> Result<RechargeResp, AppError> {
     let mut tx = state.db.begin().await?;
 
-    balance::ensure_balance_account(&mut tx, openid).await?;
-    let balance_before = balance::load_balance_for_update(&mut tx, openid).await?;
-    let balance_after = balance_before + amount;
+    balance::ensure_balance_account(&mut tx, identity_no).await?;
+    let balance_before = balance::load_balance_for_update(&mut tx, identity_no).await?;
+    let credited_amount = paid_amount.max(0);
+    let balance_after = balance_before + credited_amount;
+    let success_remark = if credited_amount == amount {
+        "recharge success".to_string()
+    } else {
+        format!(
+            "recharge success with actual deduction: requested={:.2}, paid={:.2}, credited={:.2}",
+            amount as f64 / 100.0,
+            paid_amount as f64 / 100.0,
+            credited_amount as f64 / 100.0
+        )
+    };
 
     let updated = sqlx::query(
-        "UPDATE orders SET status = 3, paid_amount = ?, external_order_no = ? \
+        "UPDATE orders SET status = 3, paid_amount = ?, external_order_no = ?, remark = ? \
          WHERE id = ? AND request_hash = ? AND status = 0",
     )
     .bind(paid_amount)
     .bind(external_order_no)
+    .bind(&success_remark)
     .bind(order.order_id)
     .bind(request_hash)
     .execute(&mut *tx)
@@ -161,19 +185,22 @@ async fn finalize_recharge_success(
         ));
     }
 
-    sqlx::query("UPDATE balance_accounts SET balance = ?, updated_at = NOW() WHERE openid = ?")
+    sqlx::query(
+        "UPDATE identity_balance_accounts SET balance = ?, updated_at = NOW() WHERE identity_no = ?",
+    )
         .bind(balance_after)
-        .bind(openid)
+        .bind(identity_no)
         .execute(&mut *tx)
         .await?;
 
     sqlx::query(
-        "INSERT INTO balance_transactions \
-         (openid, amount, balance_after, `type`, external_order_no, status, remark, request_hash) \
-         VALUES (?, ?, ?, 1, ?, 1, '主动充值成功', ?)",
+        "INSERT INTO identity_balance_transactions \
+         (identity_no, source_openid, amount, balance_after, `type`, external_order_no, status, remark, request_hash) \
+         VALUES (?, ?, ?, ?, 1, ?, 1, '主动充值成功', ?)",
     )
+    .bind(identity_no)
     .bind(openid)
-    .bind(amount)
+    .bind(credited_amount)
     .bind(balance_after)
     .bind(external_order_no)
     .bind(request_hash)
@@ -189,8 +216,9 @@ async fn finalize_recharge_success(
     tx.commit().await?;
 
     tracing::info!(
-        "[Recharge] success openid={} order_no={} balance_after={} elapsed_ms={}",
+        "[Recharge] success openid={} identity_no={} order_no={} balance_after={} elapsed_ms={}",
         openid,
+        identity_no,
         order.order_no,
         balance_after,
         started.elapsed().as_millis()
@@ -199,15 +227,20 @@ async fn finalize_recharge_success(
     Ok(RechargeResp {
         success: true,
         balance: balance_after,
-        amount,
-        amount_yuan: order.amount_yuan,
-        message: "充值成功".to_string(),
+        amount: credited_amount,
+        amount_yuan: credited_amount as f64 / 100.0,
+        message: if credited_amount == amount {
+            "充值成功".to_string()
+        } else {
+            "充值成功，已按健康卡实际扣款金额入账".to_string()
+        },
     })
 }
 
 async fn finalize_recharge_failure(
     state: &AppState,
     openid: &str,
+    identity_no: &str,
     request_hash: &str,
     order: &RechargeOrderContext,
     amount: i64,
@@ -216,8 +249,8 @@ async fn finalize_recharge_failure(
 ) -> Result<RechargeResp, AppError> {
     let mut tx = state.db.begin().await?;
 
-    balance::ensure_balance_account(&mut tx, openid).await?;
-    let balance_now = balance::load_balance_for_update(&mut tx, openid).await?;
+    balance::ensure_balance_account(&mut tx, identity_no).await?;
+    let balance_now = balance::load_balance_for_update(&mut tx, identity_no).await?;
 
     sqlx::query("UPDATE orders SET status = 4, remark = ? WHERE id = ? AND request_hash = ?")
         .bind(&reason)
@@ -227,10 +260,11 @@ async fn finalize_recharge_failure(
         .await?;
 
     sqlx::query(
-        "INSERT INTO balance_transactions \
-         (openid, amount, balance_after, `type`, external_order_no, status, remark, request_hash) \
-         VALUES (?, ?, ?, 1, NULL, 0, ?, ?)",
+        "INSERT INTO identity_balance_transactions \
+         (identity_no, source_openid, amount, balance_after, `type`, external_order_no, status, remark, request_hash) \
+         VALUES (?, ?, ?, ?, 1, NULL, 0, ?, ?)",
     )
+    .bind(identity_no)
     .bind(openid)
     .bind(amount)
     .bind(balance_now)
@@ -242,8 +276,9 @@ async fn finalize_recharge_failure(
     tx.commit().await?;
 
     tracing::warn!(
-        "[Recharge] failed openid={} order_no={} reason={} elapsed_ms={}",
+        "[Recharge] failed openid={} identity_no={} order_no={} reason={} elapsed_ms={}",
         openid,
+        identity_no,
         order.order_no,
         reason,
         started.elapsed().as_millis()
